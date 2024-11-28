@@ -1,8 +1,11 @@
 # CodeWarrior
 CodeWarrior is a discord bot to view CodeWars questions on discord.
 
-## Upcoming features
+## New feature!!
 - More commands, including one to get a random question of specified ranking
+- Command that displays a given user's information
+
+## Upcoming features
 - Option to store questions on disk, making the bot slower but taking up less RAM.
 
 ## Running the Bot

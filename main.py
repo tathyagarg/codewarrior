@@ -12,6 +12,7 @@ SIGMA = os.getenv('SIGMA')
 CHALLENGE_ENDPOINT = 'https://www.codewars.com/api/v1/code-challenges/{challenge}'
 SIGMA_USER_CHALLENGES_ENDPOINT = 'https://www.codewars.com/api/v1/users/{user}/code-challenges/completed?page={page}'
 SIGMA_USER_COUNT_ENDPOINT = 'https://www.codewars.com/api/v1/users/{user}'
+WHOIS_ENDPOINT = 'https://www.codewars.com/api/v1/users/{user}'
 
 _lim = os.getenv('LIMIT')
 if _lim:
@@ -22,13 +23,17 @@ else:
 bot = discord.Bot()
 
 QUESTIONS = [] 
+CACHE = {}
 
 COLORS = {
     'white': 0xe6e6e6,
     'yellow': 0xecb613,
     'blue': 0x1f87e7,
-    'purple': 0x866cc7
+    'purple': 0x866cc7,
+    'black': 0x666666,
+    'red': 0x993229
 }
+ERR = 0xcc0000 
 
 LANGUAGES = {
     'c': '<:c_:1311363854265221160>',
@@ -60,6 +65,17 @@ LANGUAGES = {
     'typescript': '<:typescript:1311363958782955570>',
 }
 
+def make_question_embed(data, desc):
+    embed = discord.Embed(title=data['name'], description=desc, url=data['url'], color=COLORS.get(data['rank']['color'], 0xffffff))
+    embed.add_field(name='Ranking', value=data['rank']['name'])
+
+    languages = ''
+    for lang in data['languages']:
+        languages += LANGUAGES.get(lang, lang.capitalize()) + ' '
+
+    embed.add_field(name='Languages', value=languages)
+    return embed
+
 @bot.event
 async def on_ready():
     global QUESTIONS
@@ -88,22 +104,76 @@ async def question(ctx):
     
     while True:
         slug = random.choice(QUESTIONS)
+        if slug in CACHE: continue
+
         data = requests.get(CHALLENGE_ENDPOINT.format(challenge=slug)).json()
 
-        if data['rank']['name']: break
+
+        if data['rank']['name']:
+            CACHE[slug] = data['rank']['name']
+            break
     
     desc = data['description']
     if len(desc) > 4096:
         desc = desc[:4093] + '...'
 
-    embed = discord.Embed(title=data['name'], description=desc, url=data['url'], color=COLORS.get(data['rank']['color'], 0xffffff))
-    embed.add_field(name='Ranking', value=data['rank']['name'])
+    await ctx.respond(embed=make_question_embed(data, desc))
 
-    languages = ''
-    for lang in data['languages']:
-        languages += LANGUAGES.get(lang, lang.capitalize()) + ' '
+@bot.command(description="Fetch a random Code Wars question of a specified kyu ranking")
+async def ranked_question(ctx, kyu: int):
+    if kyu < 1 or kyu > 8:
+        embed = discord.Embed(title="Invalid kyu", description="`kyu` in Code Wars can only range from `1` (hardest) to `8` (easiest). Please pick a kyu ranking within that range.", color=ERR)
 
-    embed.add_field(name='Languages', value=languages)
+        await ctx.respond(embed=embed)
+        return
+
+    await ctx.defer()
+
+    while True:
+        slug = random.choice(QUESTIONS)
+        if slug in CACHE:
+            if CACHE[slug] != f'{kyu} kyu': continue
+
+        data = requests.get(CHALLENGE_ENDPOINT.format(challenge=slug)).json()
+
+        if data['rank']['name']: CACHE[slug] = data['rank']['name']
+
+        if data['rank']['name'] == f'{kyu} kyu': break
+
+    desc = data['description']
+    if len(desc) > 4096:
+        desc = desc[:4093] + '...'
+
+    await ctx.respond(embed=make_question_embed(data, desc))
+
+@bot.command(description='Fetch data about a user')
+async def whois(ctx, username: str):
+    await ctx.defer()
+
+    resp = requests.get(WHOIS_ENDPOINT.format(user=username))
+    if resp.status_code == 404:
+        embed = discord.Embed(title='Not a user', description=f'Code Wars tells us that there\'s no user by the name of {username}. Sure you got that right?', color=ERR)
+        await ctx.respond(embed=embed)
+        return
+    
+    data = resp.json()
+
+    embed = discord.Embed(title=username, color=COLORS.get(data['ranks']['overall']['color']), url=f'https://www.codewars.com/users/{username}')
+    embed.add_field(name='Name', value=data['name'], inline=False)
+    embed.add_field(name='Honor', value=data['honor'], inline=False)
+    embed.add_field(name='Leaderboard Position', value=data['leaderboardPosition'], inline=False)
+    embed.add_field(name='Ranking', value=data['ranks']['overall']['name'], inline=False)
+
+    langs = ''
+    for lang, lang_data in data['ranks']['languages'].items():
+        text = f'{LANGUAGES.get(lang, lang.capitalize())} - {lang_data["name"]} ({lang_data["score"]} points)\n'
+        if len(langs + text) > 1024:
+            break
+
+        langs += text
+
+    embed.add_field(name='Languages', value=langs, inline=False)
+    embed.add_field(name='Challenges Completed', value=data['codeChallenges']['totalCompleted'], inline=False)
 
     await ctx.respond(embed=embed)
 
